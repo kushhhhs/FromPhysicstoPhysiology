@@ -31,7 +31,7 @@ for ik = 1:length(k_values)
     [S.IE.WSS] = vout(calcshearstress([S.IE.Q],[S.IE.r],S.fluidviscosity));
 
     % --- 2. Simulation parameters ---
-    S.tend = 15;                % duration of the steady adaptation phase [s]
+    S.tend = 400;                % duration of the steady adaptation phase [s]
     S.k = k_values(ik);         % adaptation rate [1/s]
     S.WSSref = 5;               % reference wall shear stress [Pa]
     options = odeset('RelTol',1e-4,'MaxStep',1);
@@ -48,7 +48,7 @@ for ik = 1:length(k_values)
     t_current = 0; dt = 0.01;
     pulse_amp = 0.2; pulse_freq = 1;    % amplitude [fraction], frequency [Hz]
     pulse_period = 1/pulse_freq;
-    tend_pulse = 200*pulse_period;      % total simulation duration
+    tend_pulse = 400*pulse_period;      % total simulation duration
     tout_pulse = t_current:dt:tend_pulse;
 
     % Preallocate arrays
@@ -136,4 +136,51 @@ for ik = 1:length(k_values)
     end
 
     disp(['Finished simulation for k = ', num2str(S.k)]);
+%% === 6. Cycle-Averaged WSS Analysis ===
+samples_per_cycle = round(pulse_period / dt);
+num_cycles = floor(length(tout_pulse) / samples_per_cycle);
+
+avgWSS = zeros(num_cycles, nElem);
+t_cycles = zeros(num_cycles, 1);
+
+for c = 1:num_cycles
+    idx_start = (c-1)*samples_per_cycle + 1;
+    idx_end = c*samples_per_cycle;
+    cycle_range = idx_start:idx_end;
+
+    % Mean WSS for each vessel in this cycle
+    avgWSS(c, :) = mean(mWSS_pulse(cycle_range, :), 1);
+    t_cycles(c) = tout_pulse(idx_end);
+end
+
+% Compute average across all vessels (if you want a single representative curve)
+meanWSS_all = mean(abs(avgWSS), 2)*11;
+
+%% === 7. Detect stabilization ===
+% Calculate fractional change between consecutive cycles
+deltaWSS = abs(diff(meanWSS_all)) ./ meanWSS_all(1:end-1);
+
+% Define tolerance (1% change = stabilized)
+tolerance = 0.00001;
+disp(meanWSS_all);
+disp('diff');
+disp(diff(meanWSS_all));
+disp(deltaWSS);
+stable_idx = find(deltaWSS < tolerance, 1, 'first');
+
+if ~isempty(stable_idx)
+    stable_time = t_cycles(stable_idx);
+    fprintf('✅ Mean WSS stabilized for k = %.4f at t = %.2f s\n', S.k, stable_time);
+else
+    fprintf('⚠️ WSS did not stabilize for k = %.4f within %.2f s\n', S.k, tend_pulse);
+end
+
+%% === 8. Plot evolution of cycle-averaged WSS ===
+figure;
+plot(t_cycles, meanWSS_all, 'LineWidth', 1.8);
+xlabel('Time [s]');
+ylabel('Mean WSS over cycle [Pa]');
+title(['Cycle-averaged WSS evolution (k = ', num2str(S.k), ')']);
+grid on;
+
 end
