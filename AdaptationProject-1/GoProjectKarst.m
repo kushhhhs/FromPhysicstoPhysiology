@@ -9,11 +9,10 @@ showWSS    = false;  % set to false to hide WSS plots
 % === Define adaptation rate values ===
 k_values = [0.001];
 % , 0.0025, 0.005, 0.01
-% === Preallocate storage ===
+
 final_radii = cell(length(k_values),1);
 data = struct();   % store time + mean WSS for each k
 
-% === Setup figures before loop ===
 if showRadius
     fig_radius = figure;
     hold on;
@@ -50,10 +49,10 @@ for ik = 1:length(k_values)
     S = DefineTopology(S);
     [S.SE(find(S.sources)).sourceP] = deal(S.sourceP);
     [S.SE(find(~S.sources)).sourceP] = deal(S.sinkP);
-    [S.IE.r] = vout([S.IE.r0]);
-    [S.IE.G] = vout(conductance([S.IE.r],[S.IE.l],S.fluidviscosity));
-    [S.IN,S.IE,S.SE] = solvehemodyn(S.IN,S.IE,S.SE);
-    [S.IE.WSS] = vout(calcshearstress([S.IE.Q],[S.IE.r],S.fluidviscosity));
+    % [S.IE.r] = vout([S.IE.r0]);
+    % [S.IE.G] = vout(conductance([S.IE.r],[S.IE.l],S.fluidviscosity));
+    % [S.IN,S.IE,S.SE] = solvehemodyn(S.IN,S.IE,S.SE);
+    % [S.IE.WSS] = vout(calcshearstress([S.IE.Q],[S.IE.r],S.fluidviscosity));
     steady_r = 5.792e-4;  % example: your steady-state radius [m]
     X0_pulse = steady_r * ones(length(S.IE), 1);  % same radius for all elements
 
@@ -70,6 +69,14 @@ for ik = 1:length(k_values)
     % 
     %% --- 4. PULSATILE SIMULATION ---
     % X0_pulse = mX(end,:);
+    %% --- 3. INITIALIZE WITH STEADY RADIUS ---
+    steady_r = 5.792e-4;                        % steady-state radius [m]
+    [S.IE.r0] = deal(steady_r);                 % overwrite initial radii
+    [S.IE.r]  = deal(steady_r);                 % current radii
+    % Compute conductance and initial hemodynamics
+    [S.IE.G]  = vout(conductance([S.IE.r],[S.IE.l],S.fluidviscosity));
+    [S.IN,S.IE,S.SE] = solvehemodyn(S.IN,S.IE,S.SE);
+    X0_pulse = steady_r * ones(length(S.IE), 1);
     t_current = 0; dt = 0.01;
     pulse_amp = 0.2; pulse_freq = 1;
     pulse_period = 1/pulse_freq;
@@ -133,40 +140,46 @@ for ik = 1:length(k_values)
 
     disp(['Finished simulation for k = ', num2str(S.k)]);
 
-    %% --- 6. Cycle-Averaged WSS Analysis ---
-    samples_per_cycle = round(pulse_period / dt);
-    num_cycles = floor(length(tout_pulse) / samples_per_cycle);
-    avgWSS = zeros(num_cycles, nElem);
-    t_cycles = zeros(num_cycles, 1);
+    % %% --- 6. Cycle-Averaged WSS Analysis ---
+    % samples_per_cycle = round(pulse_period / dt);
+    % num_cycles = floor(length(tout_pulse) / samples_per_cycle);
+    % avgWSS = zeros(num_cycles, nElem);
+    % t_cycles = zeros(num_cycles, 1);
+    % 
+    % for c = 1:num_cycles
+    %     idx_start = (c-1)*samples_per_cycle + 1;
+    %     idx_end = c*samples_per_cycle;
+    %     avgWSS(c,:) = mean(mWSS_pulse(idx_start:idx_end,:), 1);
+    %     t_cycles(c) = tout_pulse(idx_end);
+    % end
+    % 
+    % meanWSS_all = mean(abs(avgWSS), 2) * 11;
+    %% --- 6. Instantaneous WSS Analysis ---
+% Compute instantaneous mean WSS (absolute value) across all vessels
+meanWSS_all = mean(abs(mWSS_pulse), 2) * 11;   % optional scaling factor (11) retained
+t_WSS = tout_pulse(:);
 
-    for c = 1:num_cycles
-        idx_start = (c-1)*samples_per_cycle + 1;
-        idx_end = c*samples_per_cycle;
-        avgWSS(c,:) = mean(mWSS_pulse(idx_start:idx_end,:), 1);
-        t_cycles(c) = tout_pulse(idx_end);
-    end
-
-    meanWSS_all = mean(abs(avgWSS), 2) * 11;
-
-    %% --- 7. Stabilization Detection ---
-    deltaWSS = abs(diff(meanWSS_all)) ./ meanWSS_all(1:end-1);
-    tolerance = 0.0001;
-    disp(meanWSS_all);
-    disp('diff');
-    disp(diff(meanWSS_all));
-    disp(deltaWSS);
-
-    stable_idx = find(deltaWSS < tolerance, 1, 'first');
-    if ~isempty(stable_idx)
-        stable_time = t_cycles(stable_idx);
-        fprintf('✅ Mean WSS stabilized for k = %.4f at t = %.2f s\n', S.k, stable_time);
-    else
-        fprintf('⚠️ WSS did not stabilize for k = %.4f within %.2f s\n', S.k, tend_pulse);
-    end
+% Display summary
+fprintf('✅ Computed instantaneous WSS for k = %.4f over %.2f s\n', S.k, tout_pulse(end));
+    % %% --- 7. Stabilization Detection ---
+    % deltaWSS = abs(diff(meanWSS_all)) ./ meanWSS_all(1:end-1);
+    % tolerance = 0.0001;
+    % disp(meanWSS_all);
+    % disp('diff');
+    % disp(diff(meanWSS_all));
+    % disp(deltaWSS);
+    % 
+    % stable_idx = find(deltaWSS < tolerance, 1, 'first');
+    % if ~isempty(stable_idx)
+    %     stable_time = t_cycles(stable_idx);
+    %     fprintf('✅ Mean WSS stabilized for k = %.4f at t = %.2f s\n', S.k, stable_time);
+    % else
+    %     fprintf('⚠️ WSS did not stabilize for k = %.4f within %.2f s\n', S.k, tend_pulse);
+    % end
 
     %% --- 8. Store for comparison & combined plot ---
     data(ik).k = S.k;
-    data(ik).t_cycles = t_cycles;
+    data(ik).t_WSS = t_WSS;
     data(ik).meanWSS = meanWSS_all;
     data(ik).Flow = mQ_pulse;
     data(ik).Radius = mX_pulse;
@@ -177,8 +190,8 @@ end
 
 %% --- Save WSS data to CSV ---
 filename_WSS = fullfile(outputFolder, sprintf('WSS_k_%.4f.csv', S.k));
-T_WSS = array2table([t_cycles, meanWSS_all, avgWSS], ...
-    'VariableNames', [{'t_cycles', 'meanWSS'}, arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false)]);
+T_WSS = array2table([t_WSS, meanWSS_all, mWSS_pulse], ...
+    'VariableNames', [{'Time_s', 'meanWSS'}, arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false)]);
 writetable(T_WSS, filename_WSS);
 fprintf('💾 Saved WSS data for k = %.4f to %s\n', S.k, filename_WSS);
 
