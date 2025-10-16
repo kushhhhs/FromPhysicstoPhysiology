@@ -7,11 +7,11 @@ showFlow   = false;  % set to false to hide flow plots
 showWSS    = false;  % set to false to hide WSS plots
 
 % === Define adaptation rate values ===
-k_values = [0.001, 0.0025, 0.005, 0.01];
-
+k_values = [0.001];
+% , 0.0025, 0.005, 0.01
 % === Preallocate storage ===
 final_radii = cell(length(k_values),1);
-WSS_data = struct();   % store time + mean WSS for each k
+data = struct();   % store time + mean WSS for each k
 
 % === Setup figures before loop ===
 if showRadius
@@ -54,11 +54,9 @@ for ik = 1:length(k_values)
     [S.IE.G] = vout(conductance([S.IE.r],[S.IE.l],S.fluidviscosity));
     [S.IN,S.IE,S.SE] = solvehemodyn(S.IN,S.IE,S.SE);
     [S.IE.WSS] = vout(calcshearstress([S.IE.Q],[S.IE.r],S.fluidviscosity));
-    WSS_before_pulse = [S.IE.WSS];
-    
-    % Display
-    disp('💡 WSS just before pulsatile flow:');
-    disp(WSS_before_pulse);
+    steady_r = 5.792e-4;  % example: your steady-state radius [m]
+    X0_pulse = steady_r * ones(length(S.IE), 1);  % same radius for all elements
+
     %% --- 2. Simulation parameters ---
     S.tend = 400;                % steady adaptation duration [s]
     S.k = k_values(ik);          % adaptation rate [1/s]
@@ -66,16 +64,16 @@ for ik = 1:length(k_values)
     options = odeset('RelTol',1e-4,'MaxStep',1);
     X0 = [S.IE.r0]';             % initial radius vector
 
-    %% --- 3. STEADY ADAPTATION RUN ---
-    [tout, mX] = ode45(@(t,X) adapt(t,X,S), [0 S.tend], X0, options);
-    final_radii{ik} = mX(end,:);
-    
+    % %% --- 3. STEADY ADAPTATION RUN ---
+    % [tout, mX] = ode45(@(t,X) adapt(t,X,S), [0 S.tend], X0, options);
+    % final_radii{ik} = mX(end,:);
+    % 
     %% --- 4. PULSATILE SIMULATION ---
-    X0_pulse = mX(end,:);
+    % X0_pulse = mX(end,:);
     t_current = 0; dt = 0.01;
     pulse_amp = 0.2; pulse_freq = 1;
     pulse_period = 1/pulse_freq;
-    tend_pulse = 400*pulse_period;
+    tend_pulse = 5*pulse_period;
     tout_pulse = t_current:dt:tend_pulse;
 
     nElem = length(X0_pulse);
@@ -167,23 +165,36 @@ for ik = 1:length(k_values)
     end
 
     %% --- 8. Store for comparison & combined plot ---
-    WSS_data(ik).k = S.k;
-    WSS_data(ik).t_cycles = t_cycles;
-    WSS_data(ik).meanWSS = meanWSS_all;
-    %% --- Save WSS data for this k to CSV ---
-    filename = sprintf('WSS_k_%.4f.csv', S.k);
-    
-    % Combine data into a table: time, mean WSS, and all vessel-wise WSS
-    T = array2table([t_cycles, meanWSS_all, avgWSS], ...
-        'VariableNames', [{'t_cycles', 'meanWSS'}, arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false)]);
-    
-    % Write to CSV
-    writetable(T, filename);
-    fprintf('💾 Saved WSS data for k = %.4f to %s\n', S.k, filename);
+    data(ik).k = S.k;
+    data(ik).t_cycles = t_cycles;
+    data(ik).meanWSS = meanWSS_all;
+    data(ik).Flow = mQ_pulse;
+    data(ik).Radius = mX_pulse;
+    outputFolder = 'SimulationResults';
+if ~exist(outputFolder, 'dir')
+    mkdir(outputFolder);
+end
 
-    % Add to combined plot
-    plot(t_cycles, meanWSS_all, 'LineWidth', 1.8, 'Color', colors(ik,:), ...
-         'DisplayName', ['k = ', num2str(S.k)]);
+%% --- Save WSS data to CSV ---
+filename_WSS = fullfile(outputFolder, sprintf('WSS_k_%.4f.csv', S.k));
+T_WSS = array2table([t_cycles, meanWSS_all, avgWSS], ...
+    'VariableNames', [{'t_cycles', 'meanWSS'}, arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false)]);
+writetable(T_WSS, filename_WSS);
+fprintf('💾 Saved WSS data for k = %.4f to %s\n', S.k, filename_WSS);
+
+%% --- Save Flow data to CSV ---
+filename_Flow = fullfile(outputFolder, sprintf('Flow_k_%.4f.csv', S.k));
+T_Flow = array2table(mQ_pulse, ...
+    'VariableNames', arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false));
+writetable(T_Flow, filename_Flow);
+fprintf('💾 Saved Flow data for k = %.4f to %s\n', S.k, filename_Flow);
+
+%% --- Save Radius data to CSV ---
+filename_Radius = fullfile(outputFolder, sprintf('Radius_k_%.4f.csv', S.k));
+T_Radius = array2table(mX_pulse, ...
+    'VariableNames', arrayfun(@(n) sprintf('Vessel_%d', n), 1:nElem, 'UniformOutput', false));
+writetable(T_Radius, filename_Radius);
+fprintf('💾 Saved Radius data for k = %.4f to %s\n', S.k, filename_Radius);
 end
 
 %% === 9. Finalize combined plots ===
@@ -223,5 +234,5 @@ legend('show', 'Location', 'best');
 grid on;
 
 %% === 11. Save all results ===
-save('WSS_data_allK.mat', 'WSS_data');
-disp('💾 Saved all WSS data to WSS_data_allK.mat');
+save('data_allK.mat', 'data');
+disp('💾 Saved all WSS data to data_allK.mat');
